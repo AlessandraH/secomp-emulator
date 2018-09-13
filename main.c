@@ -13,10 +13,6 @@ enum opcode {
 	LOADI, WRITE, READ, EXIT
 };
 
-enum regs {
-	r1 = 1, r2, r3, r4, r5, r6, r7, r8, r9, r10
-};
-
 struct {
 	int instruction;
 	char target[32], source[32];
@@ -59,6 +55,101 @@ void decode(char *op, int n) {
 	}
 }
 
+void execute(int n) {
+	int counter = 0;
+	int target, source;
+
+	for(int pc = 0; pc < n; pc++) {
+		switch (mem_code[pc].instruction) {
+			case ADD: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source+2);
+				registers[target] = registers[target] + registers[source];
+				break;
+			}
+			case SUB: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source+2);
+				registers[target] = registers[target] - registers[source];
+				break;
+			}
+			case DIV: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source+2);
+				registers[target] = registers[target] / registers[source];
+				break;
+			}
+			case MUL: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source+2);
+				registers[target] = registers[target] * registers[source];
+				break;
+			}
+			case BRZ: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source);
+				if(!registers[target]) pc += source-1;
+				break;
+			}
+			case BRNZ: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source);
+				if(registers[target]) pc += source-1;
+				break;
+			}
+			case IBRZ: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source);
+				if(!registers[target]) pc = source-1;
+				break;
+			}
+			case BLZ: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source);
+				if(registers[target] < 0) pc += source-1;
+				break;
+			}
+			case MOV: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source+2);
+				registers[target] = registers[source];
+				break;
+			}
+			case LOADM: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source);
+				registers[target] = mem_data[source];
+				break;
+			}
+			case STOREM: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source);
+				mem_data[source] = registers[target];
+				break;
+			}
+			case LOADI: {
+				target = atoi(mem_code[pc].target+1);
+				source = atoi(mem_code[pc].source);
+				registers[target] = source;
+				break;
+			}
+			case WRITE: {
+				printf("%d\n", registers[atoi(mem_code[pc].target+1)]);
+				break;
+			}
+			case READ: {
+				scanf("%d", &registers[atoi(mem_code[pc].target+1)]);
+				break;
+			}
+			case EXIT: {
+				printf("Number of instructions: %d\n", counter);
+				exit(0);
+			}
+		} //end switch
+		counter++;
+	}
+}
+
 int main(int argc, char **argv) {
 	FILE *file;
 	char buffer[255], *token;
@@ -72,7 +163,6 @@ int main(int argc, char **argv) {
 	do {
 		fgets(buffer, 255, file);
 		token = strtok(buffer, " \n");
-		printf("%s\n", token);
 		decode(token, n);
 		if (token = strtok(NULL, ",\n")) {
 			strcpy(mem_code[n].target, token);
@@ -83,12 +173,9 @@ int main(int argc, char **argv) {
 		n++;
 	} while (!feof(file) && n < MEMSZ);
 
-	printf("%d\n", n);
-
-	for (int i = 0; i < n; i++) {
-		printf("OP: %d, TARGET: %s, SOURCE: %s\n", mem_code[i].instruction, mem_code[i].target, mem_code[i].source);
-	}
-	// printf("%d\n", mem_code[0].instruction);
 	fclose(file);
+
+	execute(n);
+
 	return 0;
 }
