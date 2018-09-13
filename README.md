@@ -16,4 +16,7 @@ $ ./a.out input.s
 ```
 $ perf stat ./a.out input.s
 ```
-* Para uma entrada de tamanho `15000`: `79674186428//337567503=236`.
+* Para uma entrada de tamanho `15000`:
+
+  * <s>`79674186428//337567503=236`</s>.
+  * `6753231623//337567503=20`.

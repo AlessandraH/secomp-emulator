@@ -3,19 +3,18 @@
 #include<string.h>
 
 #define MEMSZ 1024
-#define r0 0
 
-unsigned registers[10];
+unsigned registers[11];
 unsigned mem_data[MEMSZ];
 
 enum opcode {
-	ADD = 1, SUB, DIV, MUL, BRZ, BRNZ, IBRZ, BLZ, MOV, LOADM, STOREM,
-	LOADI, WRITE, READ, EXIT
+	ADD = 1, SUB, DIV, MUL, MOV, //1
+	BRZ, BRNZ, IBRZ, BLZ, LOADM, STOREM, LOADI, //6
+	WRITE, READ, EXIT //13
 };
 
 struct {
-	int instruction;
-	char target[32], source[32];
+	int instruction, target, source;
 } mem_code[MEMSZ];
 
 void decode(char *op, int n) {
@@ -57,88 +56,63 @@ void decode(char *op, int n) {
 
 void execute(int n) {
 	int counter = 0;
-	int target, source;
 
 	for(int pc = 0; pc < n; pc++) {
 		switch (mem_code[pc].instruction) {
 			case ADD: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source+2);
-				registers[target] = registers[target] + registers[source];
+				registers[mem_code[pc].target] = registers[mem_code[pc].target] + registers[mem_code[pc].source];
 				break;
 			}
 			case SUB: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source+2);
-				registers[target] = registers[target] - registers[source];
+				registers[mem_code[pc].target] = registers[mem_code[pc].target] - registers[mem_code[pc].source];
 				break;
 			}
 			case DIV: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source+2);
-				registers[target] = registers[target] / registers[source];
+				registers[mem_code[pc].target] = registers[mem_code[pc].target] / registers[mem_code[pc].source];
 				break;
 			}
 			case MUL: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source+2);
-				registers[target] = registers[target] * registers[source];
+				registers[mem_code[pc].target] = registers[mem_code[pc].target] * registers[mem_code[pc].source];
 				break;
 			}
 			case BRZ: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source);
-				if(!registers[target]) pc += source-1;
+				if(!registers[mem_code[pc].target]) pc += mem_code[pc].source-1;
 				break;
 			}
 			case BRNZ: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source);
-				if(registers[target]) pc += source-1;
+				if(registers[mem_code[pc].target]) pc += mem_code[pc].source-1;
 				break;
 			}
 			case IBRZ: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source);
-				if(!registers[target]) pc = source-1;
+				if(!registers[mem_code[pc].target]) pc = mem_code[pc].source-1;
 				break;
 			}
 			case BLZ: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source);
-				if(registers[target] < 0) pc += source-1;
+				if(registers[mem_code[pc].target] < 0) pc += mem_code[pc].source-1;
 				break;
 			}
 			case MOV: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source+2);
-				registers[target] = registers[source];
+				registers[mem_code[pc].target] = registers[mem_code[pc].source];
 				break;
 			}
 			case LOADM: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source);
-				registers[target] = mem_data[source];
+				registers[mem_code[pc].target] = mem_data[mem_code[pc].source];
 				break;
 			}
 			case STOREM: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source);
-				mem_data[source] = registers[target];
+				mem_data[mem_code[pc].source] = registers[mem_code[pc].target];
 				break;
 			}
 			case LOADI: {
-				target = atoi(mem_code[pc].target+1);
-				source = atoi(mem_code[pc].source);
-				registers[target] = source;
+				registers[mem_code[pc].target] = mem_code[pc].source;
 				break;
 			}
 			case WRITE: {
-				printf("%d\n", registers[atoi(mem_code[pc].target+1)]);
+				printf("%d\n", registers[mem_code[pc].target]);
 				break;
 			}
 			case READ: {
-				scanf("%d", &registers[atoi(mem_code[pc].target+1)]);
+				scanf("%d", &registers[mem_code[pc].target]);
 				break;
 			}
 			case EXIT: {
@@ -164,11 +138,19 @@ int main(int argc, char **argv) {
 		fgets(buffer, 255, file);
 		token = strtok(buffer, " \n");
 		decode(token, n);
-		if (token = strtok(NULL, ",\n")) {
-			strcpy(mem_code[n].target, token);
-			if (token = strtok(NULL, "\n")) {
-				strcpy(mem_code[n].source, token);
-			}
+		if (mem_code[n].instruction < 6) {
+			token = strtok(NULL, ",\n");
+			mem_code[n].target = atoi(token+1);
+			token = strtok(NULL, "\n");
+			mem_code[n].source = atoi(token+2);
+		} else if (mem_code[n].instruction < 13) {
+			token = strtok(NULL, ",\n");
+			mem_code[n].target = atoi(token+1);
+			token = strtok(NULL, "\n");
+			mem_code[n].source = atoi(token);
+		} else if (mem_code[n].instruction != 15){
+			token = strtok(NULL, ",\n");
+			mem_code[n].target = atoi(token+1);
 		}
 		n++;
 	} while (!feof(file) && n < MEMSZ);
