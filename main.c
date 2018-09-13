@@ -17,6 +17,14 @@ struct {
 	int instruction, target, source;
 } mem_code[MEMSZ];
 
+void print_regs() {
+	printf("registers[ ");
+	for (int i = 0; i <11; i++) {
+		printf("%d ", registers[i]);
+	}
+	printf("]\n");
+}
+
 void decode(char *op, int n) {
 	if (!strcmp(op, "ADD"))
 		mem_code[n].instruction = ADD;
@@ -116,6 +124,7 @@ void execute(int n) {
 				break;
 			}
 			case EXIT: {
+				print_regs();
 				printf("Number of instructions: %d\n", counter);
 				exit(0);
 			}
