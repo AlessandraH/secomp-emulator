@@ -5,53 +5,58 @@
 #include <llvm-c/Target.h>
 #include <llvm-c/Transforms/Scalar.h>
 
-#include <llvm-c/Core.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define MEMSZ 1024
+#define MEMSZ      1024
 #define THRESHOULD 50
 
 // LLVM Stuff
-LLVMModuleRef mod;
-LLVMExecutionEngineRef engine;
+LLVMValueRef ptr_register[11];
+LLVMValueRef ptr_pc;
 
-unsigned registers[11];
-unsigned mem_data[MEMSZ];
+int registers[11];
+int mem_data[MEMSZ];
 
 enum opcode {
     ADD = 1,
     SUB,
     DIV,
     MUL,
-    MOV, //1
+    MOV,
     BRZ,
     BRNZ,
     IBRZ,
     BLZ,
     LOADM,
     STOREM,
-    LOADI, //6
+    LOADI,
     WRITE,
     READ,
-    EXIT //13
+    EXIT
 };
 
 struct region {
-    LLVMValueRef fac;
-    LLVMBasicBlockRef entry;
-    LLVMBuilderRef builder;
-    bool done;
+    LLVMModuleRef          mod;
+    LLVMExecutionEngineRef engine;
+
+    LLVMValueRef           fac;
+    LLVMBasicBlockRef      entry;
+    LLVMBuilderRef         builder;
+
+    bool                   done;
+    void                   (* fun)(void);
 };
 
 struct {
-    int instruction, target, source;
-    struct region* region;
+    int             instruction, target, source;
+    struct region * region;
 } mem_code[MEMSZ];
 
-void print_regs()
+void
+print_regs()
 {
     printf("registers[ ");
     for (int i = 0; i < 11; i++) {
@@ -60,344 +65,397 @@ void print_regs()
     printf("]\n");
 }
 
-void decode(char* op, int n)
+void
+decode(char * op, int n)
 {
-    if (!strcmp(op, "ADD"))
+    if (!strcmp(op, "ADD")) {
         mem_code[n].instruction = ADD;
-    else if (!strcmp(op, "SUB"))
+    } else if (!strcmp(op, "SUB")) {
         mem_code[n].instruction = SUB;
-    else if (!strcmp(op, "DIV"))
+    } else if (!strcmp(op, "DIV")) {
         mem_code[n].instruction = DIV;
-    else if (!strcmp(op, "MUL"))
+    } else if (!strcmp(op, "MUL")) {
         mem_code[n].instruction = MUL;
-    else if (!strcmp(op, "BRZ"))
+    } else if (!strcmp(op, "BRZ")) {
         mem_code[n].instruction = BRZ;
-    else if (!strcmp(op, "BRNZ"))
+    } else if (!strcmp(op, "BRNZ")) {
         mem_code[n].instruction = BRNZ;
-    else if (!strcmp(op, "IBRZ"))
+    } else if (!strcmp(op, "IBRZ")) {
         mem_code[n].instruction = IBRZ;
-    else if (!strcmp(op, "BLZ"))
+    } else if (!strcmp(op, "BLZ")) {
         mem_code[n].instruction = BLZ;
-    else if (!strcmp(op, "MOV"))
+    } else if (!strcmp(op, "MOV")) {
         mem_code[n].instruction = MOV;
-    else if (!strcmp(op, "LOADM"))
+    } else if (!strcmp(op, "LOADM")) {
         mem_code[n].instruction = LOADM;
-    else if (!strcmp(op, "STOREM"))
+    } else if (!strcmp(op, "STOREM")) {
         mem_code[n].instruction = STOREM;
-    else if (!strcmp(op, "LOADI"))
+    } else if (!strcmp(op, "LOADI")) {
         mem_code[n].instruction = LOADI;
-    else if (!strcmp(op, "WRITE"))
+    } else if (!strcmp(op, "WRITE")) {
         mem_code[n].instruction = WRITE;
-    else if (!strcmp(op, "READ"))
+    } else if (!strcmp(op, "READ")) {
         mem_code[n].instruction = READ;
-    else if (!strcmp(op, "EXIT"))
+    } else if (!strcmp(op, "EXIT")) {
         mem_code[n].instruction = EXIT;
-    else {
+    } else {
         printf("Error: invalid instruction '%s'.", op);
         exit(0);
     }
-}
+} /* decode */
 
 bool recording = false;
-struct region* actual;
+struct region * actual;
 
-void start_region()
+void
+start_region()
 {
-    actual = (struct region*)malloc(sizeof(struct region));
+    actual       = (struct region *) malloc(sizeof(struct region));
+    actual->done = false;
 
-    actual->fac = LLVMAddFunction(mod, "fac", LLVMFunctionType(LLVMVoidType(), NULL, 0, 0));
-    actual->entry = LLVMAppendBasicBlock(actual->fac, "entry");
+    actual->mod = LLVMModuleCreateWithName("toy");
+
+    LLVMCreateJITCompilerForModule(&actual->engine, actual->mod, 2, NULL);
+    LLVMTypeRef args[] = { };
+
+    actual->fac = LLVMAddFunction(actual->mod, "fac",
+        LLVMFunctionType(LLVMVoidType(), args, 0, 0));
+
     actual->builder = LLVMCreateBuilder();
+
+    LLVMBasicBlockRef entry = LLVMAppendBasicBlock(actual->fac, "entry");
+    LLVMPositionBuilderAtEnd(actual->builder, entry);
+
+    actual->entry = LLVMAppendBasicBlock(actual->fac, "for");
     LLVMPositionBuilderAtEnd(actual->builder, actual->entry);
+
+    LLVMSetFunctionCallConv(actual->fac, LLVMCCallConv);
 
     recording = true;
 }
 
-void end_region()
+void
+end_region(int pc)
 {
-    recording = false;
+    if (actual != NULL) {
+        actual->done = true;
+
+        LLVMValueRef p_pc = LLVMBuildPtrToInt(actual->builder, ptr_pc, LLVMPointerType(
+                LLVMInt64Type(), 0),
+            "ptr_pc");
+
+        LLVMValueRef new_pc = LLVMConstInt(LLVMInt64Type(), pc, 0);
+        LLVMBuildStore(actual->builder, new_pc, p_pc);
+        LLVMBuildRet(actual->builder, NULL);
+
+        LLVMVerifyModule(actual->mod, LLVMAbortProcessAction, NULL);
+        LLVMDumpModule(actual->mod);
+
+        actual->fun = (void (*)(void))LLVMGetFunctionAddress(actual->engine,
+            "fac");
+
+        recording = false;
+    }
 }
 
-bool call_region(int pc)
+bool
+call_region(int pc)
 {
-    if (mem_code[pc].region->done) {
-        LLVMRunFunction(engine, mem_code[pc].region->fac, 0, NULL);
+    if (mem_code[pc].region != NULL && mem_code[pc].region->done) {
+        mem_code[pc].region->fun();
+
         return true;
     }
+
     if (recording) {
         mem_code[pc].region = actual;
+
         switch (mem_code[pc].instruction) {
-        case ADD: {
-            LLVMValueRef int_ptr_target = LLVMConstInt(LLVMInt64Type(), (long long)&registers[mem_code[pc].target], 0);
-            LLVMValueRef int_ptr_source = LLVMConstInt(LLVMInt64Type(), (long long)&registers[mem_code[pc].source], 0);
-            LLVMValueRef ptr_target = LLVMBuildIntToPtr(actual->builder, int_ptr_target, LLVMInt32Type(), 0);
-            LLVMValueRef ptr_source = LLVMBuildIntToPtr(actual->builder, int_ptr_target, LLVMInt32Type(), 0);
-
-            LLVMValueRef tmp = LLVMBuildAdd(
-                actual->builder,
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].target], 0),
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].source], 0),
-                "tmp");
-            LLVMBuildStore(
-                actual->builder,
-                tmp,
-                LLVMConstInt(
-                    LLVMInt64Type(),
-                    (long long)&registers[mem_code[pc].target], 0));
-            break;
-        }
-        case SUB: {
-            LLVMValueRef tmp = LLVMBuildSub(
-                actual->builder,
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].target], 0),
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].source], 0),
-                "tmp");
-            LLVMBuildStore(
-                actual->builder,
-                tmp,
-                LLVMConstInt(
-                    LLVMInt64Type(),
-                    (long long)&registers[mem_code[pc].target], 0));
-            break;
-        }
-        case DIV: {
-            LLVMValueRef tmp = LLVMBuildUDiv(
-                actual->builder,
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].target], 0),
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].source], 0),
-                "tmp");
-            LLVMBuildStore(
-                actual->builder,
-                tmp,
-                LLVMConstInt(
-                    LLVMInt64Type(),
-                    (long long)&registers[mem_code[pc].target], 0));
-            break;
-        }
-        case MUL: {
-            LLVMValueRef tmp = LLVMBuildMul(
-                actual->builder,
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].target], 0),
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].source], 0),
-                "tmp");
-            LLVMBuildStore(
-                actual->builder,
-                tmp,
-                LLVMConstInt(
-                    LLVMInt64Type(),
-                    (long long)&registers[mem_code[pc].target], 0));
-            break;
-        }
-        case BRZ: {
-            end_region();
-            if (!registers[mem_code[pc].target]) {
-                pc += mem_code[pc].source;
-                hot_code[pc]++;
-                if (hot_code[pc] > THRESHOULD)
-                    start_region();
-                pc--;
-            }
-            break;
-        }
-        case BRNZ: {
-            end_region();
-            if (registers[mem_code[pc].target]) {
-                pc += mem_code[pc].source;
-                hot_code[pc]++;
-                if (hot_code[pc] > THRESHOULD)
-                    start_region();
-                pc--;
-            }
-            break;
-        }
-        case IBRZ: {
-            end_region();
-            if (!registers[mem_code[pc].target]) {
-                pc = mem_code[pc].source;
-                hot_code[pc]++;
-                if (hot_code[pc] > THRESHOULD)
-                    start_region();
-                pc--;
-            }
-            break;
-        }
-        case BLZ: {
-            end_region();
-            if (registers[mem_code[pc].target] < 0) {
-                pc += mem_code[pc].source;
-                hot_code[pc]++;
-                if (hot_code[pc] > THRESHOULD)
-                    start_region();
-                pc--;
-            }
-            break;
-        }
-        case MOV: {
-            LLVMValueRef s_llvm = LLVMConstInt(LLVMInt64Type(), &registers[mem_code[pc].source], 0);
-
-            LLVMBuildStore(
-                actual->builder,
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].source], 0),
-                LLVMConstInt(
-                    LLVMInt64Type(),
-                    (long long)&registers[mem_code[pc].target], 0));
-            break;
-        }
-        case LOADM: {
-            LLVMBuildStore(
-                actual->builder,
-                LLVMConstInt(LLVMInt32Type(), mem_data[mem_code[pc].source], 0),
-                LLVMConstInt(
-                    LLVMInt64Type(),
-                    (long long)&registers[mem_code[pc].target], 0));
-            break;
-        }
-        case STOREM: {
-            LLVMBuildStore(
-                actual->builder,
-                LLVMConstInt(LLVMInt32Type(), registers[mem_code[pc].source], 0),
-                LLVMConstInt(
-                    LLVMInt64Type(),
-                    (long long)&mem_data[mem_code[pc].target], 0));
-            break;
-        }
-        case LOADI: {
-            LLVMBuildStore(
-                actual->builder,
-                LLVMConstInt(LLVMInt32Type(), mem_code[pc].source, 0),
-                LLVMConstInt(
-                    LLVMInt64Type(),
-                    (long long)&registers[mem_code[pc].target], 0));
-            break;
-        }
-        case WRITE: {
-            printf("%d\n", registers[mem_code[pc].target]);
-            break;
-        }
-        case READ: {
-            scanf("%d", &registers[mem_code[pc].target]);
-            break;
-        }
-        case EXIT: {
-            print_regs();
-            exit(0);
-        }
-        } //end switch
-    }
-    return false;
-}
-
-void execute(int n)
-{
-    int counter = 0;
-    int hot_code[n];
-
-    for (int pc = 0; pc < n; pc++) {
-        if (!call_region(pc))
-            switch (mem_code[pc].instruction) {
             case ADD: {
-                registers[mem_code[pc].target] += registers[mem_code[pc].source];
+                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].target], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_target");
+                LLVMValueRef ptr_source = LLVMBuildPtrToInt(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].source], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_source");
+
+                LLVMValueRef source = LLVMBuildLoad(actual->builder, ptr_source,
+                    "source");
+                LLVMValueRef target = LLVMBuildLoad(actual->builder, ptr_target,
+                    "target");
+
+                LLVMValueRef tmp = LLVMBuildAdd(actual->builder, source, target,
+                    "tmp");
+
+                LLVMBuildStore(actual->builder, tmp, ptr_target);
                 break;
             }
             case SUB: {
-                registers[mem_code[pc].target] -= registers[mem_code[pc].source];
+                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].target], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_target");
+                LLVMValueRef ptr_source = LLVMBuildPtrToInt(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].source], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_source");
+
+                LLVMValueRef source = LLVMBuildLoad(actual->builder, ptr_source,
+                    "source");
+                LLVMValueRef target = LLVMBuildLoad(actual->builder, ptr_target,
+                    "target");
+
+                LLVMValueRef tmp = LLVMBuildSub(actual->builder, source, target,
+                    "tmp");
+
+                LLVMBuildStore(actual->builder, tmp, ptr_target);
                 break;
             }
             case DIV: {
-                registers[mem_code[pc].target] /= registers[mem_code[pc].source];
+                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].target], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_target");
+                LLVMValueRef ptr_source = LLVMBuildPtrToInt(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].source], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_source");
+
+                LLVMValueRef source = LLVMBuildLoad(actual->builder, ptr_source,
+                    "source");
+                LLVMValueRef target = LLVMBuildLoad(actual->builder, ptr_target,
+                    "target");
+
+                LLVMValueRef tmp = LLVMBuildUDiv(actual->builder, source, target,
+                    "tmp");
+
+                LLVMBuildStore(actual->builder, tmp, ptr_target);
                 break;
             }
             case MUL: {
-                registers[mem_code[pc].target] *= registers[mem_code[pc].source];
+                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].target], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_target");
+                LLVMValueRef ptr_source = LLVMBuildPtrToInt(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].source], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_source");
+
+                LLVMValueRef source = LLVMBuildLoad(actual->builder, ptr_source,
+                    "source");
+                LLVMValueRef target = LLVMBuildLoad(actual->builder, ptr_target,
+                    "target");
+
+                LLVMValueRef tmp = LLVMBuildMul(actual->builder, source, target,
+                    "tmp");
+
+                LLVMBuildStore(actual->builder, tmp, ptr_target);
                 break;
             }
             case BRZ: {
-                end_region();
-                if (!registers[mem_code[pc].target]) {
-                    pc += mem_code[pc].source;
-                    hot_code[pc]++;
-                    if (hot_code[pc] > THRESHOULD)
-                        start_region();
-                    pc--;
-                }
                 break;
             }
             case BRNZ: {
-                end_region();
-                if (registers[mem_code[pc].target]) {
-                    pc += mem_code[pc].source;
-                    hot_code[pc]++;
-                    if (hot_code[pc] > THRESHOULD)
-                        start_region();
-                    pc--;
-                }
+                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].target], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_target");
+                LLVMValueRef target = LLVMBuildLoad(actual->builder, ptr_target,
+                    "target");
+
+                LLVMBasicBlockRef else_br = LLVMAppendBasicBlock(actual->fac, "else");
+                LLVMBasicBlockRef exit  = LLVMAppendBasicBlock(actual->fac, "exit");
+
+                LLVMBuildCondBr(actual->builder,
+                  LLVMBuildICmp(actual->builder, LLVMIntNE, target,
+                  LLVMConstInt(LLVMInt64Type(), 0, 0),
+                  "cond"), actual->entry, else_br);
+
+                LLVMPositionBuilderAtEnd(actual->builder, else_br);
+                LLVMBuildBr(actual->builder, exit);
+
+                LLVMPositionBuilderAtEnd(actual->builder, exit);
                 break;
             }
             case IBRZ: {
-                end_region();
-                if (!registers[mem_code[pc].target]) {
-                    pc = mem_code[pc].source;
-                    hot_code[pc]++;
-                    if (hot_code[pc] > THRESHOULD)
-                        start_region();
-                    pc--;
-                }
                 break;
             }
             case BLZ: {
-                end_region();
-                if (registers[mem_code[pc].target] < 0) {
-                    pc += mem_code[pc].source;
-                    hot_code[pc]++;
-                    if (hot_code[pc] > THRESHOULD)
-                        start_region();
-                    pc--;
-                }
                 break;
             }
             case MOV: {
-                registers[mem_code[pc].target] = registers[mem_code[pc].source];
                 break;
             }
             case LOADM: {
-                registers[mem_code[pc].target] = mem_data[mem_code[pc].source];
                 break;
             }
             case STOREM: {
-                mem_data[mem_code[pc].source] = registers[mem_code[pc].target];
                 break;
             }
             case LOADI: {
-                registers[mem_code[pc].target] = mem_code[pc].source;
                 break;
             }
             case WRITE: {
-                printf("%d\n", registers[mem_code[pc].target]);
                 break;
             }
             case READ: {
-                scanf("%d", &registers[mem_code[pc].target]);
                 break;
             }
             case EXIT: {
-                print_regs();
-                printf("Number of instructions: %d\n", counter);
                 exit(0);
             }
-            } //end switch
+        } // end switch
+    }
+    return false;
+} /* call_region */
+
+void
+execute(int n)
+{
+    int counter = 0;
+    int hot_code[n];
+    unsigned int pc;
+
+    // Initialize ptr contants to registers
+    ptr_pc = LLVMConstInt(LLVMInt64Type(), (long long) &pc, 0);
+
+    for (pc = 0; pc < n; pc++) {
+        if (!call_region(pc)) {
+            switch (mem_code[pc].instruction) {
+                case ADD: {
+                    registers[mem_code[pc].target] +=
+                      registers[mem_code[pc].source];
+                    break;
+                }
+                case SUB: {
+                    registers[mem_code[pc].target] -=
+                      registers[mem_code[pc].source];
+                    break;
+                }
+                case DIV: {
+                    registers[mem_code[pc].target] /=
+                      registers[mem_code[pc].source];
+                    break;
+                }
+                case MUL: {
+                    registers[mem_code[pc].target] *=
+                      registers[mem_code[pc].source];
+                    break;
+                }
+                case BRZ: {
+                    end_region(pc);
+                    if (!registers[mem_code[pc].target]) {
+                        pc += mem_code[pc].source;
+                        hot_code[pc]++;
+                        if (hot_code[pc] > THRESHOULD)
+                            start_region();
+                        pc--;
+                    }
+                    break;
+                }
+                case BRNZ: {
+                    end_region(pc);
+                    if (registers[mem_code[pc].target]) {
+                        pc += mem_code[pc].source;
+                        hot_code[pc]++;
+                        if (hot_code[pc] > THRESHOULD)
+                            start_region();
+                        pc--;
+                    }
+                    break;
+                }
+                case IBRZ: {
+                    end_region(pc);
+                    if (!registers[mem_code[pc].target]) {
+                        pc = mem_code[pc].source;
+                        hot_code[pc]++;
+                        if (hot_code[pc] > THRESHOULD)
+                            start_region();
+                        pc--;
+                    }
+                    break;
+                }
+                case BLZ: {
+                    end_region(pc);
+                    if (registers[mem_code[pc].target] < 0) {
+                        pc += mem_code[pc].source;
+                        hot_code[pc]++;
+                        if (hot_code[pc] > THRESHOULD)
+                            start_region();
+                        pc--;
+                    }
+                    break;
+                }
+                case MOV: {
+                    registers[mem_code[pc].target] = registers[mem_code[pc].source];
+                    break;
+                }
+                case LOADM: {
+                    registers[mem_code[pc].target] = mem_data[mem_code[pc].source];
+                    break;
+                }
+                case STOREM: {
+                    mem_data[mem_code[pc].source] = registers[mem_code[pc].target];
+                    break;
+                }
+                case LOADI: {
+                    registers[mem_code[pc].target] = mem_code[pc].source;
+                    break;
+                }
+                case WRITE: {
+                    printf("%d\n", registers[mem_code[pc].target]);
+                    break;
+                }
+                case READ: {
+                    scanf("%d", &registers[mem_code[pc].target]);
+                    break;
+                }
+                case EXIT: {
+                    print_regs();
+                    printf("Number of instructions: %d\n", counter);
+                    exit(0);
+                }
+            } // end switch
+        }
         counter++;
+    }
+} /* execute */
+
+void
+init_llvm()
+{
+    // Start LLVM JIT
+    LLVMLinkInMCJIT();
+    LLVMInitializeNativeTarget();
+    LLVMInitializeNativeAsmPrinter();
+    LLVMInitializeNativeAsmParser();
+
+    for (int i = 0; i < 11; i++) {
+        ptr_register[i] = LLVMConstInt(
+            LLVMInt64Type(), (long long) &registers[i], 0);
     }
 }
 
-int main(int argc, char** argv)
+int
+main(int _argc, char ** argv)
 {
-    FILE* file;
-    char buffer[255], *token;
+    init_llvm();
+
+    FILE * file;
+    char buffer[255], * token;
     int n = 0;
-    LLVMLinkInMCJIT();
-    LLVMInitializeNativeTarget();
-    mod = LLVMModuleCreateWithName("toy");
-    LLVMCreateExecutionEngineForModule(&engine, mod, NULL);
 
     if ((file = fopen(argv[1], "r")) == NULL) {
         printf("Error: opening file.\n");
@@ -430,4 +488,4 @@ int main(int argc, char** argv)
     execute(n);
 
     return 0;
-}
+} /* main */
