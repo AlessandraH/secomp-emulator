@@ -1,6 +1,6 @@
-CC=clang
+CC=gcc
 CFLAGS=`llvm-config --cflags`
-LD=clang
+LD=g++
 LDFLAGS=`llvm-config --libs --cflags --ldflags core analysis executionengine mcjit interpreter native`
 
 main: main.o

@@ -17,7 +17,7 @@
 LLVMValueRef ptr_register[11];
 LLVMValueRef ptr_pc;
 
-int registers[11];
+long long int registers[11];
 int mem_data[MEMSZ];
 
 enum opcode {
@@ -116,7 +116,7 @@ start_region()
     actual->mod = LLVMModuleCreateWithName("toy");
 
     LLVMCreateJITCompilerForModule(&actual->engine, actual->mod, 2, NULL);
-    LLVMTypeRef args[] = { };
+    LLVMTypeRef args[0];
 
     actual->fac = LLVMAddFunction(actual->mod, "fac",
         LLVMFunctionType(LLVMVoidType(), args, 0, 0));
@@ -142,7 +142,7 @@ end_region(int pc)
     if (actual != NULL) {
         actual->done = true;
 
-        LLVMValueRef p_pc = LLVMBuildPtrToInt(actual->builder, ptr_pc, LLVMPointerType(
+        LLVMValueRef p_pc = LLVMBuildIntToPtr(actual->builder, ptr_pc, LLVMPointerType(
                 LLVMInt64Type(), 0),
             "ptr_pc");
 
@@ -174,12 +174,12 @@ call_region(int pc)
 
         switch (mem_code[pc].instruction) {
             case ADD: {
-                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                LLVMValueRef ptr_target = LLVMBuildIntToPtr(actual->builder,
                     ptr_register[mem_code[pc
                     ].target], LLVMPointerType(
                         LLVMInt64Type(), 0),
                     "ptr_target");
-                LLVMValueRef ptr_source = LLVMBuildPtrToInt(actual->builder,
+                LLVMValueRef ptr_source = LLVMBuildIntToPtr(actual->builder,
                     ptr_register[mem_code[pc
                     ].source], LLVMPointerType(
                         LLVMInt64Type(), 0),
@@ -197,12 +197,12 @@ call_region(int pc)
                 break;
             }
             case SUB: {
-                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                LLVMValueRef ptr_target = LLVMBuildIntToPtr(actual->builder,
                     ptr_register[mem_code[pc
                     ].target], LLVMPointerType(
                         LLVMInt64Type(), 0),
                     "ptr_target");
-                LLVMValueRef ptr_source = LLVMBuildPtrToInt(actual->builder,
+                LLVMValueRef ptr_source = LLVMBuildIntToPtr(actual->builder,
                     ptr_register[mem_code[pc
                     ].source], LLVMPointerType(
                         LLVMInt64Type(), 0),
@@ -220,12 +220,12 @@ call_region(int pc)
                 break;
             }
             case DIV: {
-                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                LLVMValueRef ptr_target = LLVMBuildIntToPtr(actual->builder,
                     ptr_register[mem_code[pc
                     ].target], LLVMPointerType(
                         LLVMInt64Type(), 0),
                     "ptr_target");
-                LLVMValueRef ptr_source = LLVMBuildPtrToInt(actual->builder,
+                LLVMValueRef ptr_source = LLVMBuildIntToPtr(actual->builder,
                     ptr_register[mem_code[pc
                     ].source], LLVMPointerType(
                         LLVMInt64Type(), 0),
@@ -243,12 +243,12 @@ call_region(int pc)
                 break;
             }
             case MUL: {
-                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                LLVMValueRef ptr_target = LLVMBuildIntToPtr(actual->builder,
                     ptr_register[mem_code[pc
                     ].target], LLVMPointerType(
                         LLVMInt64Type(), 0),
                     "ptr_target");
-                LLVMValueRef ptr_source = LLVMBuildPtrToInt(actual->builder,
+                LLVMValueRef ptr_source = LLVMBuildIntToPtr(actual->builder,
                     ptr_register[mem_code[pc
                     ].source], LLVMPointerType(
                         LLVMInt64Type(), 0),
@@ -277,7 +277,7 @@ call_region(int pc)
                 LLVMBuildBr(actual->builder, cond_br);
 
                 LLVMPositionBuilderAtEnd(actual->builder, cond_br);
-                LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
+                LLVMValueRef ptr_target = LLVMBuildIntToPtr(actual->builder,
                     ptr_register[mem_code[pc
                     ].target], LLVMPointerType(
                         LLVMInt64Type(), 0),
@@ -306,6 +306,21 @@ call_region(int pc)
                 break;
             }
             case MOV: {
+                LLVMValueRef ptr_target = LLVMBuildIntToPtr(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].target], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_target");
+                LLVMValueRef ptr_source = LLVMBuildIntToPtr(actual->builder,
+                    ptr_register[mem_code[pc
+                    ].source], LLVMPointerType(
+                        LLVMInt64Type(), 0),
+                    "ptr_source");
+
+                LLVMValueRef source = LLVMBuildLoad(actual->builder, ptr_source,
+                    "source");
+
+                LLVMBuildStore(actual->builder, source, ptr_target);
                 break;
             }
             case LOADM: {
@@ -324,7 +339,7 @@ call_region(int pc)
                 break;
             }
             case EXIT: {
-                exit(0);
+                return false;
             }
         } // end switch
     }
@@ -336,6 +351,10 @@ execute(int n)
 {
     int counter = 0;
     int hot_code[n];
+
+    for (int i = 0; i < n; i++)
+        hot_code[i] = 0;
+
     unsigned int pc;
 
     // Initialize ptr contants to registers
@@ -380,7 +399,7 @@ execute(int n)
                     if (registers[mem_code[pc].target]) {
                         pc += mem_code[pc].source;
                         hot_code[pc]++;
-                        if (hot_code[pc] > THRESHOULD)
+                        if (hot_code[pc] > THRESHOULD && mem_code[pc].region == NULL)
                             start_region();
                         pc--;
                     }
@@ -453,8 +472,7 @@ init_llvm()
     LLVMInitializeNativeAsmParser();
 
     for (int i = 0; i < 11; i++) {
-        ptr_register[i] = LLVMConstInt(
-            LLVMInt64Type(), (long long) &registers[i], 0);
+        ptr_register[i] = LLVMConstInt(LLVMInt64Type(), &registers[i], 0);
     }
 }
 
