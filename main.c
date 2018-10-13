@@ -124,9 +124,11 @@ start_region()
     actual->builder = LLVMCreateBuilder();
 
     LLVMBasicBlockRef entry = LLVMAppendBasicBlock(actual->fac, "entry");
-    LLVMPositionBuilderAtEnd(actual->builder, entry);
-
     actual->entry = LLVMAppendBasicBlock(actual->fac, "for");
+
+    LLVMPositionBuilderAtEnd(actual->builder, entry);
+    LLVMBuildBr(actual->builder, actual->entry);
+
     LLVMPositionBuilderAtEnd(actual->builder, actual->entry);
 
     LLVMSetFunctionCallConv(actual->fac, LLVMCCallConv);
@@ -211,7 +213,7 @@ call_region(int pc)
                 LLVMValueRef target = LLVMBuildLoad(actual->builder, ptr_target,
                     "target");
 
-                LLVMValueRef tmp = LLVMBuildSub(actual->builder, source, target,
+                LLVMValueRef tmp = LLVMBuildSub(actual->builder, target, source,
                     "tmp");
 
                 LLVMBuildStore(actual->builder, tmp, ptr_target);
@@ -267,6 +269,14 @@ call_region(int pc)
                 break;
             }
             case BRNZ: {
+                LLVMBasicBlockRef cond_br = LLVMAppendBasicBlock(actual->fac, "cond");
+                LLVMBasicBlockRef then = LLVMAppendBasicBlock(actual->fac, "then");
+                LLVMBasicBlockRef else_br = LLVMAppendBasicBlock(actual->fac, "else");
+                LLVMBasicBlockRef exit  = LLVMAppendBasicBlock(actual->fac, "exit");
+
+                LLVMBuildBr(actual->builder, cond_br);
+
+                LLVMPositionBuilderAtEnd(actual->builder, cond_br);
                 LLVMValueRef ptr_target = LLVMBuildPtrToInt(actual->builder,
                     ptr_register[mem_code[pc
                     ].target], LLVMPointerType(
@@ -275,13 +285,13 @@ call_region(int pc)
                 LLVMValueRef target = LLVMBuildLoad(actual->builder, ptr_target,
                     "target");
 
-                LLVMBasicBlockRef else_br = LLVMAppendBasicBlock(actual->fac, "else");
-                LLVMBasicBlockRef exit  = LLVMAppendBasicBlock(actual->fac, "exit");
-
                 LLVMBuildCondBr(actual->builder,
                   LLVMBuildICmp(actual->builder, LLVMIntNE, target,
                   LLVMConstInt(LLVMInt64Type(), 0, 0),
-                  "cond"), actual->entry, else_br);
+                  "cond"), then, else_br);
+
+                LLVMPositionBuilderAtEnd(actual->builder, then);
+                LLVMBuildBr(actual->builder, actual->entry);
 
                 LLVMPositionBuilderAtEnd(actual->builder, else_br);
                 LLVMBuildBr(actual->builder, exit);

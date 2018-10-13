@@ -1,6 +1,6 @@
 LOADI r1, 0
 LOADI r3, 1
-LOADI r2, 5
+LOADI r2, 10
 MOV r4, r2
 ADD r1, r4
 SUB r4, r3
